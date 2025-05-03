@@ -1,0 +1,791 @@
+---
+title: "UK2007 Spam Detection Analysis"
+author: "Group 4"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: united
+    highlight: tango
+    code_folding: show
+---
+
+# 1. General Description
+
+## Dataset Overview
+
+The WEBSPAM-UK2007 dataset was collected by the Web Algorithmics Lab at Università degli Studi di Milano to support the Web Spam Challenge 2008 competition. This dataset represents a comprehensive collection of web hosts from the .UK domain, aimed at developing and evaluating methods for detecting web spam.
+
+## Dataset Purpose and Collection
+
+-   **Collection Purpose**: To provide a standardized dataset for web spam detection research and competition
+-   **Collection Entity**: Web Algorithmics Lab, Università degli Studi di Milano
+-   **Domain Coverage**: .UK domain websites
+-   **Primary Task**: Binary classification (spam vs. non-spam websites)
+
+## Dataset Scale
+
+-   **Total Hosts**: 114,529 websites in the .UK domain
+-   **Labeled Samples**:
+    -   Training Set (SET1): 3,998 samples
+    -   Test Set (SET2): 2,055 samples
+    -   Note: In this analysis, we combine both sets for comprehensive evaluation
+-   **Domain Structure**: Based on third-level domains to prevent training/test contamination
+
+## Label Categories
+
+-   **Spam**: Websites identified as spam
+-   **Non-spam**: Legitimate websites
+-   **Undecided**: Uncertain cases (excluded from modeling)
+
+# 2. General Properties
+
+## Feature Sets Description
+
+The dataset includes three distinct feature sets:
+
+1.  **Direct Features (Obvious Features)**:
+    -   Number of features: 2
+    -   Types: Page count and domain name length
+    -   Simple, directly observable characteristics
+2.  **Link-based Features (Transformed)**:
+    -   Number of features: 138
+    -   Types: Various transformed link metrics
+    -   Includes ratios and logarithmic transformations of link-based characteristics
+3.  **Content-based Features**:
+    -   Number of features: 96
+    -   Types: Text and content characteristics
+    -   Derived from website content analysis
+
+> This chunk sets up the R environment and loads necessary libraries for data analysis, visualization, and reporting.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+
+# Load required libraries
+library(tidyverse)
+library(skimr)
+library(corrplot)
+library(scales)
+library(kableExtra)
+```
+
+> This chunk loads and preprocesses the dataset, including reading the feature sets and labels, combining the training and test sets, and merging features with their corresponding labels.
+
+```{r load-data}
+# Read the feature sets
+direct_features <- read_csv("1.uk-2007-05.obvious_features.csv")
+link_features <- read_csv("2.uk-2007-05.link_based_features_transformed.csv")
+content_features <- read_csv("3.uk-2007-05.content_based_features.csv")
+
+# Read and process labels - note these are space-separated files without headers
+labels_set1 <- read.table("WEBSPAM-UK2007-SET1-labels.txt") %>%
+  setNames(c("hostid", "label", "spamicity", "assessments"))
+
+labels_set2 <- read.table("WEBSPAM-UK2007-SET2-labels.txt") %>%
+  setNames(c("hostid", "label", "spamicity", "assessments"))
+
+# Combine labels and convert to binary (spam/non-spam)
+all_labels <- rbind(labels_set1, labels_set2) %>%
+  filter(label != "undecided") %>%
+  mutate(is_spam = ifelse(label == "spam", 1, 0))
+
+# Merge features with labels
+direct_with_labels <- direct_features %>%
+  rename(hostid = `#hostid`) %>%
+  inner_join(all_labels, by = "hostid") %>%
+  select(-label, -spamicity, -assessments)
+
+link_with_labels <- link_features %>%
+  rename(hostid = `#hostid`) %>%
+  inner_join(all_labels, by = "hostid") %>%
+  select(-label, -spamicity, -assessments)
+
+content_with_labels <- content_features %>%
+  rename(hostid = `#hostid`) %>%
+  inner_join(all_labels, by = "hostid") %>%
+  select(-label, -spamicity, -assessments)
+```
+
+## Class Distribution Analysis
+
+> This chunk analyzes and visualizes the distribution of spam vs non-spam labels in the dataset, highlighting the class imbalance issue.
+
+```{r label-distribution}
+# Analyze label distribution
+label_dist <- all_labels %>%
+  group_by(label) %>%
+  summarise(count = n()) %>%
+  mutate(percentage = count / sum(count) * 100)
+
+# Create a bar plot of label distribution
+ggplot(label_dist, aes(x = label, y = count, fill = label)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = sprintf("%.1f%%", percentage)), 
+            position = position_stack(vjust = 0.5)) +
+  theme_minimal() +
+  labs(title = "Distribution of Labels in the Dataset (Combined SET1 and SET2)",
+       x = "Label",
+       y = "Count",
+       subtitle = "Shows significant class imbalance") +
+  scale_fill_brewer(palette = "Set2")
+
+# Print detailed distribution
+cat("\nDetailed Label Distribution:\n")
+cat("SET1 (Training):", 
+    "\n- Non-spam:", sum(labels_set1$label == "nonspam"),
+    "\n- Spam:", sum(labels_set1$label == "spam"),
+    "\n\nSET2 (Testing):",
+    "\n- Non-spam:", sum(labels_set2$label == "nonspam"),
+    "\n- Spam:", sum(labels_set2$label == "spam"),
+    "\n\nCombined:",
+    "\n- Non-spam:", sum(all_labels$label == "nonspam"),
+    "\n- Spam:", sum(all_labels$label == "spam"),
+    "\n\nAnalysis: The dataset shows severe class imbalance, with spam samples being significantly underrepresented.")
+```
+
+## Feature Analysis and Standardization Requirements
+
+> This chunk creates comprehensive summaries of each feature set, including the number of features, sample sizes, missing values, and value ranges to determine standardization requirements.
+
+```{r feature-summaries}
+# Function to create feature summary
+create_feature_summary <- function(data, feature_set_name) {
+  # Remove ID and label columns
+  feature_cols <- data %>%
+    select(-hostid, -is_spam) %>%
+    # Remove hostname if it exists
+    select(-any_of("hostname")) %>%
+    names()
+  
+  # Calculate summary statistics
+  summary_stats <- data %>%
+    select(all_of(feature_cols)) %>%
+    summary()
+  
+  # Check for missing values
+  missing_count <- sum(is.na(data[feature_cols]))
+  
+  # Calculate value ranges
+  value_ranges <- data %>%
+    select(all_of(feature_cols)) %>%
+    summarise(across(everything(), list(min = min, max = max))) %>%
+    gather() %>%
+    summarise(
+      min_value = min(value),
+      max_value = max(value)
+    )
+  
+  # Combine into a data frame
+  tibble(
+    feature_set = feature_set_name,
+    n_features = length(feature_cols),
+    n_samples = nrow(data),
+    missing_values = missing_count,
+    value_range = sprintf("%.2f to %.2f", value_ranges$min_value, value_ranges$max_value),
+    needs_standardization = if(value_ranges$max_value - value_ranges$min_value > 10) "Yes" else "No"
+  )
+}
+
+# Create summaries for each feature set
+feature_summaries <- bind_rows(
+  create_feature_summary(direct_with_labels, "Direct Features"),
+  create_feature_summary(link_with_labels, "Link-based Features"),
+  create_feature_summary(content_with_labels, "Content-based Features")
+)
+
+# Display the summary table
+feature_summaries %>%
+  kable(caption = "Summary of Feature Sets") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+cat("\nFeature Set Analysis:\n")
+cat("1. Direct Features (obvious features):\n",
+    "- Contains count-based features with varying scales\n",
+    "- Standardization needed due to different scales\n\n")
+cat("2. Link-based Features (transformed):\n",
+    "- Already includes some transformations (e.g., logarithmic)\n",
+    "- Still shows wide value ranges\n",
+    "- Standardization recommended for consistent scaling\n\n")
+cat("3. Content-based Features:\n",
+    "- Mix of different metrics and scales\n",
+    "- Standardization needed for comparable feature importance\n")
+```
+
+> This chunk implements the data cleaning and standardization process for each feature set, handling missing values and normalizing features to ensure comparable scales.
+>
+> > All features were standardized using Z-score normalization (mean = 0, standard deviation = 1) via R's scale() function. As a result, the normalized values may be negative or exceed 1, which is expected and appropriate for models such as logistic regression and SVM.
+
+```{r data-cleaning}
+# Function to clean and normalize features
+clean_and_normalize <- function(data) {
+  # Remove ID and target columns for processing
+  features <- data %>%
+    select(-hostid, -is_spam) %>%
+    # Remove hostname if it exists
+    select(-any_of("hostname"))
+  
+  # Handle missing values
+  features <- features %>%
+    mutate_all(~ifelse(is.na(.), mean(., na.rm = TRUE), .))
+  
+  # Normalize features
+  features_normalized <- scale(features)
+  
+  # Combine normalized features with ID and target
+  result <- cbind(
+    data %>% select(hostid, is_spam),
+    as.data.frame(features_normalized)
+  )
+  
+  # Add hostname back if it exists in original data
+  if ("hostname" %in% names(data)) {
+    result <- cbind(
+      result %>% select(hostid),
+      data %>% select(hostname),
+      result %>% select(-hostid)
+    )
+  }
+  
+  result
+}
+
+# Clean and normalize each feature set
+direct_clean <- clean_and_normalize(direct_with_labels)
+link_clean <- clean_and_normalize(link_with_labels)
+content_clean <- clean_and_normalize(content_with_labels)
+```
+
+# 3. Classification Methods Selection and Implementation
+
+### Model Selection Strategy
+
+For each feature set, we need to select and implement the most appropriate classification method based on the characteristics of the features and the nature of our binary classification problem. Here's our analysis and justification for each feature set:
+
+### 1. Set 1: Direct Features (2 features) - Delicia
+
+-   **Selected Method**: Logistic Regression
+-   **Justification**:
+    -   Very small number of features (only 2)
+    -   Simple, interpretable model suitable for low-dimensional data
+    -   Efficient for binary classification
+    -   Provides probability outputs for AUC calculation
+    -   No need for complex feature selection or parameter tuning
+-   **Additional Considerations**:
+    -   Features are already standardized in preprocessing
+    -   L2 regularization will be used to prevent overfitting
+
+> This chunk implements logistic regression for the direct features set, including model training, prediction, and performance evaluation. Both single split ROC and CV AUC are computed.
+
+```{r direct-features-model}
+library(caret)
+library(pROC)
+
+set.seed(42)
+direct_idx <- createDataPartition(direct_clean$is_spam, p = 0.7, list = FALSE)
+direct_train <- direct_clean[direct_idx, ] %>% select(is_spam, number_of_pages, length_of_hostname)
+direct_test <- direct_clean[-direct_idx, ] %>% select(is_spam, number_of_pages, length_of_hostname)
+
+direct_model <- glm(is_spam ~ ., data = direct_train, family = "binomial")
+direct_pred_prob <- predict(direct_model, direct_test, type = "response")
+direct_pred_label <- ifelse(direct_pred_prob >= 0.5, 1, 0)
+direct_cm <- caret::confusionMatrix(factor(direct_pred_label), factor(direct_test$is_spam), positive = "1")
+direct_precision <- direct_cm$byClass["Precision"]
+direct_recall <- direct_cm$byClass["Recall"]
+direct_f1 <- direct_cm$byClass["F1"]
+
+# direct_roc is used in step 4 for comparsion
+direct_roc <- roc(direct_test$is_spam, direct_pred_prob)
+
+# CV AUC (only numeric features)
+# 5 折交叉验证（Cross-Validation）计算平均 AUC
+cv_folds <- createFolds(direct_clean$is_spam, k = 5, list = TRUE, returnTrain = FALSE)
+direct_auc_cv <- mean(sapply(cv_folds, function(idx) {
+  train <- direct_clean[-idx, ] %>% select(is_spam, number_of_pages, length_of_hostname)
+  test <- direct_clean[idx, ] %>% select(is_spam, number_of_pages, length_of_hostname)
+  model <- glm(is_spam ~ ., data = train, family = "binomial")
+  pred <- predict(model, test, type = "response")
+  auc(roc(test$is_spam, pred, quiet=TRUE))
+}))
+cat("\nDirect Features 5-fold CV Mean AUC:", round(direct_auc_cv, 4), "\n")
+
+# 检查预测标签分布
+cat("Direct pred label table:\n")
+print(table(direct_pred_label))
+cat("Direct test true label table:\n")
+print(table(direct_test$is_spam))
+```
+
+### 2. Set 2: Link-based Features (138 features) - Bernice
+
+
+-   **Selected Method**: Random Forest
+-   **Justification**:
+    -   High-dimensional feature space (138 features)
+    -   Excellent performance with high-dimensional data
+    -   Built-in feature importance evaluation
+    -   Robust to different scales and non-linear relationships
+    -   Handles class imbalance well with proper weighting
+-   **Additional Considerations**:
+    -   Will use class weights to address imbalance
+    -   No need for additional feature scaling
+
+> This chunk implements random forest classification for the link-based features, including single split ROC and CV AUC.
+
+```{r link-features-model}
+library(randomForest)
+library(pROC)
+library(caret)
+
+# Link features: single split for ROC, CV for AUC
+set.seed(42)
+link_train_index <- createDataPartition(link_clean$is_spam, p = 0.7, list = FALSE)
+link_train <- link_clean[link_train_index, ]
+link_test <- link_clean[-link_train_index, ]
+
+# Single split model for ROC
+# 处理不平衡
+class_weights <- ifelse(link_train$is_spam == 1,
+                       (1/table(link_train$is_spam)[2]) * 0.5,
+                       (1/table(link_train$is_spam)[1]) * 0.5)
+#单次训练模型用于ROC画图（500棵树）
+link_model <- randomForest(factor(is_spam) ~ ., data = link_train, weights = class_weights, ntree = 500, importance = TRUE)
+link_pred_prob <- predict(link_model, link_test, type = "prob")[,2]
+link_roc <- roc(link_test$is_spam, link_pred_prob)
+
+# 5-fold cross validation for AUC（200棵树）
+cv_folds <- createFolds(link_clean$is_spam, k = 5, list = TRUE, returnTrain = FALSE)
+link_auc_cv <- mean(sapply(cv_folds, function(idx) {
+  train <- link_clean[-idx, ]
+  test <- link_clean[idx, ]
+  cw <- ifelse(train$is_spam == 1, (1/table(train$is_spam)[2]) * 0.5, (1/table(train$is_spam)[1]) * 0.5)
+  model <- randomForest(factor(is_spam) ~ ., data = train, weights = cw, ntree = 200)
+  pred <- predict(model, test, type = "prob")[,2]
+  auc(roc(test$is_spam, pred, quiet=TRUE))
+}))
+cat("\nLink Features 5-fold CV Mean AUC:", round(link_auc_cv, 4), "\n")
+
+# Link Features 混淆矩阵和指标
+link_pred_label <- ifelse(link_pred_prob >= 0.5, 1, 0)
+link_cm <- caret::confusionMatrix(factor(link_pred_label), factor(link_test$is_spam), positive = "1")
+link_precision <- link_cm$byClass["Precision"]
+link_recall <- link_cm$byClass["Recall"]
+link_f1 <- link_cm$byClass["F1"]
+```
+
+### 3. Set 3: Content-based Features (96 features) - Moto
+
+你的这个要看一下参数，现在是cost = 1, gamma = 0.1；你看要不要在cha一下，找一下更好的参数
+你的1+3的组合也是用的SVM。
+
+-   **Selected Method**: Support Vector Machine (SVM) with RBF kernel
+-   **Justification**:
+    -   Medium-dimensional feature space (96 features)
+    -   Features are continuous statistical measures
+    -   SVM with RBF kernel can capture non-linear relationships
+    -   Effective for imbalanced datasets with proper class weights
+    -   Works well with standardized features
+-   **Additional Considerations**:
+    -   Features are already standardized from preprocessing
+    -   Will use cross-validation for hyperparameter tuning
+
+> This chunk implements SVM classification for the content-based features, including single split ROC and CV AUC.
+
+```{r content-features-model}
+library(e1071)
+library(pROC)
+library(caret)
+
+# Content features: single split for ROC, CV for AUC
+set.seed(42)
+content_train_index <- createDataPartition(content_clean$is_spam, p = 0.7, list = FALSE)
+content_train <- content_clean[content_train_index, ]
+content_test <- content_clean[-content_train_index, ]
+
+# Exclude only hostid and hostname, keep all other features (including is_spam)
+content_train_num <- content_train %>% select(-hostid, -hostname)
+content_test_num <- content_test %>% select(-hostid, -hostname)
+
+
+# SVM建模，使用 radial basis function（径向基核）和类不平衡处理
+model <- svm(is_spam ~ ., data = content_train_num, kernel = "radial", cost = 1, gamma = 0.1,
+             class.weights = c("0" = 1, "1" = sum(content_train_num$is_spam == 0)/sum(content_train_num$is_spam == 1)),
+             probability = FALSE)
+
+decision <- attributes(predict(model, content_test_num, decision.values = TRUE))$decision.values
+
+# 修正ROC方向：如果AUC小于0.5则自动翻转decision值
+content_roc <- roc(content_test_num$is_spam, as.numeric(decision), levels = c(0, 1), direction = "<", positive = 1)
+if (auc(content_roc) < 0.5) {
+  content_roc <- roc(content_test_num$is_spam, -as.numeric(decision), levels = c(0, 1), direction = "<", positive = 1)
+}
+
+# CV AUC (exclude only hostid, hostname)
+# 分fold
+cv_folds <- createFolds(content_clean$is_spam, k = 5, list = TRUE, returnTrain = FALSE)
+
+content_auc_cv <- mean(sapply(cv_folds, function(idx) {
+  #去掉hostid, hostname field
+  train <- content_clean[-idx, ] %>% select(-hostid, -hostname)
+  test <- content_clean[idx, ] %>% select(-hostid, -hostname)
+  # svm模型训练，精细调整需要调整cost=1, gamma=0.1两个参数
+  m <- svm(is_spam ~ ., data = train, kernel = "radial", cost = 1, gamma = 0.1,
+           class.weights = c("0" = 1, "1" = sum(train$is_spam == 0)/sum(train$is_spam == 1)), probability = FALSE)
+  dec <- attributes(predict(m, test, decision.values = TRUE))$decision.values
+  auc(roc(test$is_spam, as.numeric(dec), quiet=TRUE))
+}))
+
+cat("\nContent Features 5-fold CV Mean AUC:", round(content_auc_cv, 4), "\n")
+
+# Content Features 混淆矩阵和指标
+content_pred_label <- ifelse(as.numeric(decision) >= 0, 1, 0)
+content_cm <- caret::confusionMatrix(factor(content_pred_label), factor(content_test_num$is_spam), positive = "1")
+content_precision <- content_cm$byClass["Precision"]
+content_recall <- content_cm$byClass["Recall"]
+content_f1 <- content_cm$byClass["F1"]
+```
+
+# 4. Model Performance Comparison - Ren
+
+> **Note:** AUC values in the table are from 5-fold cross-validation (CV) for each feature set, providing a robust estimate of model performance under data imbalance. ROC curves are from a single train/test split and are for visual comparison only. This approach is common in reports to balance scientific rigor and intuitive visualization.
+
+```{r model-comparison}
+# Combined ROC plot: Direct, Link, and Content (single split)
+plot(direct_roc, col = "blue", main = "ROC Curves Comparison (Single Split)", lwd = 2)
+lines(link_roc, col = "red", lwd = 2)
+lines(content_roc$specificities, content_roc$sensitivities, col = "green", lwd = 2)
+legend("bottomright", legend = c(
+  paste("Direct Features (ROC, single split)"),
+  paste("Link Features (ROC, single split)"),
+  paste("Content Features (ROC, single split)")
+), col = c("blue", "red", "green"), lwd = 2)
+
+# Create summary table with CV AUCs
+model_comparison <- data.frame(
+  Feature_Set = c("Direct Features", "Link-based Features", "Content-based Features"),
+  Model = c("Logistic Regression", "Random Forest", "SVM (RBF)"),
+  CV_AUC = c(direct_auc_cv, link_auc_cv, content_auc_cv),
+  Features = c(2, 138, 96)
+)
+
+# Display comparison table
+model_comparison %>%
+  arrange(desc(CV_AUC)) %>%
+  mutate(CV_AUC = ifelse(is.na(CV_AUC), "NA", round(CV_AUC, 4))) %>%
+  kable(caption = "Model Performance Comparison (5-fold CV AUC)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+# 检查预测标签分布
+cat("Direct pred label table:\n")
+print(table(direct_pred_label))
+cat("Direct test true label table:\n")
+print(table(direct_test$is_spam))
+
+# 混淆矩阵和指标对比表，NA用0替代
+cm_comparison <- data.frame(
+  Feature_Set = c("Direct Features", "Link-based Features", "Content-based Features"),
+  Precision = sapply(list(direct_precision, link_precision, content_precision), function(x) ifelse(is.na(x), 0, round(x, 4))),
+  Recall = sapply(list(direct_recall, link_recall, content_recall), function(x) ifelse(is.na(x), 0, round(x, 4))),
+  F1 = sapply(list(direct_f1, link_f1, content_f1), function(x) ifelse(is.na(x), 0, round(x, 4)))
+)
+
+cm_comparison %>%
+  kable(caption = "Precision, Recall, F1-score Comparison (Single Split)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+cat("\n混淆矩阵和指标分析：\n")
+cat("- Precision 衡量预测为 spam 的准确性，Recall 衡量对 spam 的召回能力，F1 综合两者。\n")
+cat("- Link-based Features 通常在 Precision、Recall、F1 上表现更优，Direct Features 受限于特征信息，Content Features 依赖内容特征质量。\n")
+```
+
+### ROC/AUC Comparison and Interpretation
+
+The table above summarizes the predictive performance of each feature set and classification method using 5-fold cross-validated AUC as the main metric. The ROC curves provide a visual comparison of model discrimination on a single train/test split.
+
+#### Ranking of Feature Sets by Predictive Power (AUC)
+
+1.  **`r model_comparison$Feature_Set[which.max(model_comparison$CV_AUC)]`** (AUC = `r round(max(model_comparison$CV_AUC), 4)`) — *Best predictive performance*
+2.  **`r model_comparison$Feature_Set[order(model_comparison$CV_AUC, decreasing=TRUE)[2]]`** (AUC = `r round(sort(model_comparison$CV_AUC, decreasing=TRUE)[2], 4)`)
+3.  **`r model_comparison$Feature_Set[which.min(model_comparison$CV_AUC)]`** (AUC = `r round(min(model_comparison$CV_AUC), 4)`) — *Poorest predictive performance*
+
+#### Analysis and Discussion
+
+-   **Direct Features (Logistic Regression):**
+    -   *Strengths:* Simple, interpretable, fast to train, and robust to overfitting with only two features. Provides clear probability outputs for ranking hosts by spamicity.
+    -   *Weaknesses:* Limited by the small number of features; cannot capture complex or nonlinear relationships. Predictive power is constrained by the information content of the direct features.
+    -   *Contextual Note:* In this dataset, direct features alone are insufficient for high-accuracy spam detection, as indicated by the lower AUC.
+-   **Link-based Features (Random Forest):**
+    -   *Strengths:* Handles high-dimensional data and complex, nonlinear relationships. Robust to outliers and can model feature interactions. Built-in feature importance helps interpretability. Random Forests are less sensitive to class imbalance with proper weighting.
+    -   *Weaknesses:* Less interpretable than logistic regression. May require more computational resources. Performance can degrade if many features are irrelevant or highly correlated.
+    -   *Contextual Note:* Link-based features provide richer information, and Random Forests leverage this to achieve higher AUC, making this approach effective for web spam detection.
+-   **Content-based Features (SVM with RBF):**
+    -   *Strengths:* SVMs are powerful for medium-dimensional, continuous data and can model complex, nonlinear boundaries. With class weighting, SVMs can handle imbalanced data. Good at capturing subtle content-based patterns.
+    -   *Weaknesses:* Less interpretable, sensitive to parameter tuning (cost, gamma), and computationally intensive for large datasets. SVMs may struggle if features are not well-scaled or if there is noise.
+    -   *Contextual Note:* Content-based features, when combined with SVM, can provide strong predictive power, but performance depends on the quality and relevance of the content features.
+
+#### Overall Findings
+
+-   **AUC as a Metric:** AUC is a robust measure for imbalanced classification problems, as it evaluates the model's ability to rank positive (spam) and negative (non-spam) cases across all thresholds.
+-   **Best Feature Set:** The feature set with the highest AUC is the most effective for spam detection in this dataset. The results show that `r model_comparison$Feature_Set[which.max(model_comparison$CV_AUC)]` outperforms the others, likely due to the richness and relevance of its features.
+-   **Visual ROC Comparison:** The ROC curves confirm the ranking, with the best model showing the greatest separation from the diagonal (random guess) line.
+
+### Recommendations
+
+-   For practical deployment, use the feature set and model with the highest AUC.
+-   Consider combining feature sets or using ensemble methods for further improvement.
+-   Address class imbalance with appropriate weighting or sampling if deploying on new data.
+
+# 5. Feature Set Combinations: Model Deployment and Comparison
+
+### 5.1 Combination 1: Obvious Features (Set 1) + Link-based Features (Set 2) ——Delicia
+
+> We combined the obvious features and link-based features to leverage both simple host-level and complex graph-based information. Random Forest is chosen for its robustness to high-dimensional data and ability to model non-linear relationships.
+
+```{r combo1-obvious-link}
+# 合并特征集1和2
+combo1 <- direct_with_labels %>%
+  select(-is_spam) %>%
+  inner_join(link_with_labels, by = "hostid") %>%
+  select(-hostid) # 保留所有特征和is_spam
+
+# 标准化（去除is_spam和所有非数值型列）
+combo1_features <- combo1 %>% select(-is_spam) %>% select(where(is.numeric))
+combo1_features_scaled <- scale(combo1_features)
+combo1_clean <- cbind(is_spam = combo1$is_spam, as.data.frame(combo1_features_scaled))
+
+# 划分训练/测试集
+set.seed(42)
+combo1_idx <- createDataPartition(combo1_clean$is_spam, p = 0.7, list = FALSE)
+combo1_train <- combo1_clean[combo1_idx, ]
+combo1_test <- combo1_clean[-combo1_idx, ]
+
+# 类别权重
+class_weights <- ifelse(combo1_train$is_spam == 1,
+                       (1/table(combo1_train$is_spam)[2]) * 0.5,
+                       (1/table(combo1_train$is_spam)[1]) * 0.5)
+
+# 训练Random Forest
+combo1_model <- randomForest(factor(is_spam) ~ ., data = combo1_train, weights = class_weights, ntree = 500, importance = TRUE)
+combo1_pred_prob <- predict(combo1_model, combo1_test, type = "prob")[,2]
+combo1_roc <- roc(combo1_test$is_spam, combo1_pred_prob)
+
+# 混淆矩阵和指标
+combo1_pred_label <- ifelse(combo1_pred_prob >= 0.5, 1, 0)
+combo1_cm <- caret::confusionMatrix(factor(combo1_pred_label), factor(combo1_test$is_spam), positive = "1")
+combo1_precision <- combo1_cm$byClass["Precision"]
+combo1_recall <- combo1_cm$byClass["Recall"]
+combo1_f1 <- combo1_cm$byClass["F1"]
+
+cat("\nCombo1 (Obvious + Link) AUC:", round(auc(combo1_roc), 4), "\n")
+cat("Precision:", round(combo1_precision, 4), " Recall:", round(combo1_recall, 4), " F1:", round(combo1_f1, 4), "\n")
+```
+
+### 5.2 Combination 2: Obvious Features (Set 1) + Content-based Features (Set 3) --Moto
+
+> We combined the obvious features and content-based features to capture both simple host-level and rich textual information. SVM with RBF kernel is chosen for its ability to model non-linear relationships in medium-dimensional data.
+
+```{r combo2-obvious-content}
+# 合并特征集1和3
+combo2 <- direct_with_labels %>%
+  select(-is_spam) %>%
+  inner_join(content_with_labels, by = "hostid") %>%
+  select(-hostid) # 保留所有特征和is_spam
+
+# 标准化（去除is_spam和所有非数值型列）
+combo2_features <- combo2 %>% select(-is_spam) %>% select(where(is.numeric))
+combo2_features_scaled <- scale(combo2_features)
+combo2_clean <- cbind(is_spam = combo2$is_spam, as.data.frame(combo2_features_scaled))
+
+# 划分训练/测试集
+set.seed(42)
+combo2_idx <- createDataPartition(combo2_clean$is_spam, p = 0.7, list = FALSE)
+combo2_train <- combo2_clean[combo2_idx, ]
+combo2_test <- combo2_clean[-combo2_idx, ]
+
+# SVM建模，径向基核+类别不平衡处理
+combo2_train_num <- combo2_train
+combo2_test_num <- combo2_test
+combo2_model <- svm(is_spam ~ ., data = combo2_train_num, kernel = "radial", cost = 1, gamma = 0.1,
+                    class.weights = c("0" = 1, "1" = sum(combo2_train_num$is_spam == 0)/sum(combo2_train_num$is_spam == 1)),
+                    probability = FALSE)
+combo2_decision <- attributes(predict(combo2_model, combo2_test_num, decision.values = TRUE))$decision.values
+# 修正ROC方向
+combo2_roc <- roc(combo2_test_num$is_spam, as.numeric(combo2_decision), levels = c(0, 1), direction = "<", positive = 1)
+if (auc(combo2_roc) < 0.5) {
+  combo2_roc <- roc(combo2_test_num$is_spam, -as.numeric(combo2_decision), levels = c(0, 1), direction = "<", positive = 1)
+}
+# 混淆矩阵和指标
+combo2_pred_label <- ifelse(as.numeric(combo2_decision) >= 0, 1, 0)
+combo2_cm <- caret::confusionMatrix(factor(combo2_pred_label), factor(combo2_test_num$is_spam), positive = "1")
+combo2_precision <- combo2_cm$byClass["Precision"]
+combo2_recall <- combo2_cm$byClass["Recall"]
+combo2_f1 <- combo2_cm$byClass["F1"]
+
+cat("\nCombo2 (Obvious + Content) AUC:", round(auc(combo2_roc), 4), "\n")
+cat("Precision:", round(combo2_precision, 4), " Recall:", round(combo2_recall, 4), " F1:", round(combo2_f1, 4), "\n")
+```
+
+### 5.3 Combination 3: Link-based Features (Set 2) + Content-based Features (Set 3) -- Bernice
+
+> We combined the link-based and content-based features to leverage both structural and textual information. Random Forest is chosen for its scalability and ability to handle mixed-type, high-dimensional data.
+
+```{r combo3-link-content}
+# 合并特征集2和3
+combo3 <- link_with_labels %>%
+  select(-is_spam) %>%
+  inner_join(content_with_labels, by = "hostid") %>%
+  select(-hostid) # 保留所有特征和is_spam
+
+# 标准化（去除is_spam和所有非数值型列）
+combo3_features <- combo3 %>% select(-is_spam) %>% select(where(is.numeric))
+combo3_features_scaled <- scale(combo3_features)
+combo3_clean <- cbind(is_spam = combo3$is_spam, as.data.frame(combo3_features_scaled))
+
+# 划分训练/测试集
+set.seed(42)
+combo3_idx <- createDataPartition(combo3_clean$is_spam, p = 0.7, list = FALSE)
+combo3_train <- combo3_clean[combo3_idx, ]
+combo3_test <- combo3_clean[-combo3_idx, ]
+
+# 类别权重
+class_weights <- ifelse(combo3_train$is_spam == 1,
+                       (1/table(combo3_train$is_spam)[2]) * 0.5,
+                       (1/table(combo3_train$is_spam)[1]) * 0.5)
+
+# 训练Random Forest
+combo3_model <- randomForest(factor(is_spam) ~ ., data = combo3_train, weights = class_weights, ntree = 500, importance = TRUE)
+combo3_pred_prob <- predict(combo3_model, combo3_test, type = "prob")[,2]
+combo3_roc <- roc(combo3_test$is_spam, combo3_pred_prob)
+
+# 混淆矩阵和指标
+combo3_pred_label <- ifelse(combo3_pred_prob >= 0.5, 1, 0)
+combo3_cm <- caret::confusionMatrix(factor(combo3_pred_label), factor(combo3_test$is_spam), positive = "1")
+combo3_precision <- combo3_cm$byClass["Precision"]
+combo3_recall <- combo3_cm$byClass["Recall"]
+combo3_f1 <- combo3_cm$byClass["F1"]
+
+cat("\nCombo3 (Link + Content) AUC:", round(auc(combo3_roc), 4), "\n")
+cat("Precision:", round(combo3_precision, 4), " Recall:", round(combo3_recall, 4), " F1:", round(combo3_f1, 4), "\n")
+```
+
+### 5.4 Combination 4: All Features (Set 1 + Set 2 + Set 3) --Ren
+
+> We combined all three feature sets—obvious, link-based, and content-based features—to leverage the full spectrum of available information. Random Forest is used for its robustness and ability to handle high-dimensional, mixed-type data.
+
+```{r combo4-all-features}
+# 合并所有特征集
+combo4 <- direct_with_labels %>%
+  select(-is_spam) %>%
+  inner_join(link_with_labels, by = "hostid") %>%
+  select(-is_spam) %>%
+  inner_join(content_with_labels, by = "hostid") %>%
+  select(-hostid) # 保留所有特征和is_spam
+
+# 标准化（去除is_spam和所有非数值型列）
+combo4_features <- combo4 %>% select(-is_spam) %>% select(where(is.numeric))
+combo4_features_scaled <- scale(combo4_features)
+combo4_clean <- cbind(is_spam = combo4$is_spam, as.data.frame(combo4_features_scaled))
+
+# 划分训练/测试集
+set.seed(42)
+combo4_idx <- createDataPartition(combo4_clean$is_spam, p = 0.7, list = FALSE)
+combo4_train <- combo4_clean[combo4_idx, ]
+combo4_test <- combo4_clean[-combo4_idx, ]
+
+# 类别权重
+class_weights <- ifelse(combo4_train$is_spam == 1,
+                       (1/table(combo4_train$is_spam)[2]) * 0.5,
+                       (1/table(combo4_train$is_spam)[1]) * 0.5)
+
+# 训练Random Forest
+combo4_model <- randomForest(factor(is_spam) ~ ., data = combo4_train, weights = class_weights, ntree = 500, importance = TRUE)
+combo4_pred_prob <- predict(combo4_model, combo4_test, type = "prob")[,2]
+combo4_roc <- roc(combo4_test$is_spam, combo4_pred_prob)
+
+# 混淆矩阵和指标
+combo4_pred_label <- ifelse(combo4_pred_prob >= 0.5, 1, 0)
+combo4_cm <- caret::confusionMatrix(factor(combo4_pred_label), factor(combo4_test$is_spam), positive = "1")
+combo4_precision <- combo4_cm$byClass["Precision"]
+combo4_recall <- combo4_cm$byClass["Recall"]
+combo4_f1 <- combo4_cm$byClass["F1"]
+
+cat("\nCombo4 (All Features) AUC:", round(auc(combo4_roc), 4), "\n")
+cat("Precision:", round(combo4_precision, 4), " Recall:", round(combo4_recall, 4), " F1:", round(combo4_f1, 4), "\n")
+```
+
+### 5.5 Qualitative Comparison of Feature Set Combinations
+
+> The table below summarizes the predictive performance of each feature set combination using AUC, Precision, Recall, and F1-score. This is followed by a qualitative analysis of the results, highlighting the strengths and weaknesses of each approach and the impact of feature set integration.
+
+```{r combo-comparison-table}
+combo_comparison <- data.frame(
+  Combination = c(
+    "Obvious + Link",
+    "Obvious + Content",
+    "Link + Content",
+    "All Features"
+  ),
+  Model = c(
+    "Random Forest",
+    "SVM (RBF)",
+    "Random Forest",
+    "Random Forest"
+  ),
+  AUC = c(
+    round(auc(combo1_roc), 4),
+    round(auc(combo2_roc), 4),
+    round(auc(combo3_roc), 4),
+    round(auc(combo4_roc), 4)
+  ),
+  Precision = c(
+    round(combo1_precision, 4),
+    round(combo2_precision, 4),
+    round(combo3_precision, 4),
+    round(combo4_precision, 4)
+  ),
+  Recall = c(
+    round(combo1_recall, 4),
+    round(combo2_recall, 4),
+    round(combo3_recall, 4),
+    round(combo4_recall, 4)
+  ),
+  F1 = c(
+    round(combo1_f1, 4),
+    round(combo2_f1, 4),
+    round(combo3_f1, 4),
+    round(combo4_f1, 4)
+  )
+)
+combo_comparison %>%
+  kable(caption = "Performance Comparison of Feature Set Combinations (Single Split)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+#### Qualitative Analysis
+
+- **Obvious + Link**
+  This combination utilizes both simple site-level metrics and structural link data. The AUC of 0.7662 is modest, but the recall (0.1402) is very low, meaning the model misses many spam cases. While Random Forest handles link features well, the obvious features contribute little, and the overall spam detection is weak.
+
+- **Obvious + Content**
+  The SVM (RBF) model captures subtle, non-linear textual patterns in content. Although the precision (0.3000) is slightly lower, the recall improves significantly to 0.3871, resulting in the highest F1-score (0.3380) among all combinations. This suggests it's relatively better at identifying spam correctly, even with fewer features.
+
+- **Link + Content**
+  This combination balances structural and content signals. Random Forest delivers the second-highest AUC (0.8240) and a better balance of precision (0.5152) and recall (0.1828) compared to previous sets. It shows robustness across spam strategies, although F1-score (0.2698) remains slightly behind SVM.
+
+- **All Features**
+  Using the full feature set yields the best overall AUC (0.8249) and the highest precision (0.5714). Recall (0.2151) improves over other Random Forest models, giving a strong F1-score of 0.3125. Although not the top in F1, this approach ensures stable, high-confidence predictions and is suitable when computational cost is acceptable.
+
+⸻
+
+🔍 **General Insights:**
+- Combining Link + Content is crucial — this pairing consistently outperforms combinations that include only one of the two.
+- SVM excels in recall and F1 when using content features, showing its strength in uncovering non-linear patterns.
+- Random Forest remains a solid choice for high-dimensional mixed-type features, offering stable AUC and precision.
+- If spam recall is a priority, SVM with content may be preferred; if balanced performance is key, Random Forest with all features is recommended.
