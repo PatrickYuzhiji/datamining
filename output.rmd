@@ -269,7 +269,7 @@ content_clean <- clean_and_normalize(content_with_labels)
 
 For each feature set, we need to select and implement the most appropriate classification method based on the characteristics of the features and the nature of our binary classification problem. Here's our analysis and justification for each feature set:
 
-### 1. Set 1: Direct Features (2 features) - Delicia
+### 1. Set 1: Direct Features (2 features)
 
 -   **Selected Method**: Logistic Regression
 -   **Justification**:
@@ -323,8 +323,7 @@ cat("Direct test true label table:\n")
 print(table(direct_test$is_spam))
 ```
 
-### 2. Set 2: Link-based Features (138 features) - Bernice
-
+### 2. Set 2: Link-based Features (138 features) 
 
 -   **Selected Method**: Random Forest
 -   **Justification**:
@@ -380,10 +379,7 @@ link_recall <- link_cm$byClass["Recall"]
 link_f1 <- link_cm$byClass["F1"]
 ```
 
-### 3. Set 3: Content-based Features (96 features) - Moto
-
-你的这个要看一下参数，现在是cost = 1, gamma = 0.1；你看要不要在cha一下，找一下更好的参数
-你的1+3的组合也是用的SVM。
+### 3. Set 3: Content-based Features (96 features) 
 
 -   **Selected Method**: Support Vector Machine (SVM) with RBF kernel
 -   **Justification**:
@@ -452,7 +448,7 @@ content_recall <- content_cm$byClass["Recall"]
 content_f1 <- content_cm$byClass["F1"]
 ```
 
-# 4. Model Performance Comparison - Ren
+# 4. Model Performance Comparison
 
 > **Note:** AUC values in the table are from 5-fold cross-validation (CV) for each feature set, providing a robust estimate of model performance under data imbalance. ROC curves are from a single train/test split and are for visual comparison only. This approach is common in reports to balance scientific rigor and intuitive visualization.
 
@@ -491,16 +487,19 @@ print(table(direct_test$is_spam))
 # 混淆矩阵和指标对比表，NA用0替代
 cm_comparison <- data.frame(
   Feature_Set = c("Direct Features", "Link-based Features", "Content-based Features"),
+  CV_AUC = c(direct_auc_cv, link_auc_cv, content_auc_cv),
   Precision = sapply(list(direct_precision, link_precision, content_precision), function(x) ifelse(is.na(x), 0, round(x, 4))),
   Recall = sapply(list(direct_recall, link_recall, content_recall), function(x) ifelse(is.na(x), 0, round(x, 4))),
   F1 = sapply(list(direct_f1, link_f1, content_f1), function(x) ifelse(is.na(x), 0, round(x, 4)))
 )
 
 cm_comparison %>%
-  kable(caption = "Precision, Recall, F1-score Comparison (Single Split)") %>%
-  kable_styling(bootstrap_options = c("striped", "hover"))
+  kable(caption = "Model Performance Comparison (CV AUC and Classification Metrics)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  add_header_above(c(" " = 1, "Performance Metrics" = 4))
 
 cat("\n混淆矩阵和指标分析：\n")
+cat("- CV_AUC: 5-fold cross-validated AUC，提供更稳健的性能估计\n")
 cat("- Precision 衡量预测为 spam 的准确性，Recall 衡量对 spam 的召回能力，F1 综合两者。\n")
 cat("- Link-based Features 通常在 Precision、Recall、F1 上表现更优，Direct Features 受限于特征信息，Content Features 依赖内容特征质量。\n")
 ```
@@ -515,36 +514,106 @@ The table above summarizes the predictive performance of each feature set and cl
 2.  **`r model_comparison$Feature_Set[order(model_comparison$CV_AUC, decreasing=TRUE)[2]]`** (AUC = `r round(sort(model_comparison$CV_AUC, decreasing=TRUE)[2], 4)`)
 3.  **`r model_comparison$Feature_Set[which.min(model_comparison$CV_AUC)]`** (AUC = `r round(min(model_comparison$CV_AUC), 4)`) — *Poorest predictive performance*
 
-#### Analysis and Discussion
+#### Analysis and Comparison of Results
 
--   **Direct Features (Logistic Regression):**
-    -   *Strengths:* Simple, interpretable, fast to train, and robust to overfitting with only two features. Provides clear probability outputs for ranking hosts by spamicity.
-    -   *Weaknesses:* Limited by the small number of features; cannot capture complex or nonlinear relationships. Predictive power is constrained by the information content of the direct features.
-    -   *Contextual Note:* In this dataset, direct features alone are insufficient for high-accuracy spam detection, as indicated by the lower AUC.
--   **Link-based Features (Random Forest):**
-    -   *Strengths:* Handles high-dimensional data and complex, nonlinear relationships. Robust to outliers and can model feature interactions. Built-in feature importance helps interpretability. Random Forests are less sensitive to class imbalance with proper weighting.
-    -   *Weaknesses:* Less interpretable than logistic regression. May require more computational resources. Performance can degrade if many features are irrelevant or highly correlated.
-    -   *Contextual Note:* Link-based features provide richer information, and Random Forests leverage this to achieve higher AUC, making this approach effective for web spam detection.
--   **Content-based Features (SVM with RBF):**
-    -   *Strengths:* SVMs are powerful for medium-dimensional, continuous data and can model complex, nonlinear boundaries. With class weighting, SVMs can handle imbalanced data. Good at capturing subtle content-based patterns.
-    -   *Weaknesses:* Less interpretable, sensitive to parameter tuning (cost, gamma), and computationally intensive for large datasets. SVMs may struggle if features are not well-scaled or if there is noise.
-    -   *Contextual Note:* Content-based features, when combined with SVM, can provide strong predictive power, but performance depends on the quality and relevance of the content features.
+Based on the comprehensive metrics, we can analyze the performance of each feature set and classification method:
 
-#### Overall Findings
+1. **Direct Features (Logistic Regression)**
+   - *Performance Metrics*:
+     - CV_AUC: 0.5245 (barely better than random)
+     - Precision, Recall, F1: All 0.0000
+   - *Strengths*:
+     - Simple and interpretable model
+     - Fast training and prediction
+     - Works well with small feature sets
+   - *Weaknesses*:
+     - Severely underperforms in this spam detection task
+     - Cannot capture complex patterns with only 2 features
+     - Linear model limitations in handling non-linear relationships
+   - *Context*: The poor performance suggests that basic host-level features (page count and domain length) are insufficient for spam detection.
 
--   **AUC as a Metric:** AUC is a robust measure for imbalanced classification problems, as it evaluates the model's ability to rank positive (spam) and negative (non-spam) cases across all thresholds.
--   **Best Feature Set:** The feature set with the highest AUC is the most effective for spam detection in this dataset. The results show that `r model_comparison$Feature_Set[which.max(model_comparison$CV_AUC)]` outperforms the others, likely due to the richness and relevance of its features.
--   **Visual ROC Comparison:** The ROC curves confirm the ranking, with the best model showing the greatest separation from the diagonal (random guess) line.
+2. **Link-based Features (Random Forest)**
+   - *Performance Metrics*:
+     - CV_AUC: 0.7345 (moderate performance)
+     - Precision: 0.3542
+     - Recall: 0.1589
+     - F1: 0.2194
+   - *Strengths*:
+     - Handles high-dimensional data (138 features) effectively
+     - Captures non-linear relationships and feature interactions
+     - Robust to outliers and noise
+     - Built-in feature importance evaluation
+   - *Weaknesses*:
+     - Low recall indicates missing many spam cases
+     - Moderate precision suggests false positives
+     - May be computationally intensive
+   - *Context*: The link structure provides valuable information for spam detection, but the model struggles with class imbalance.
 
-### Recommendations
+3. **Content-based Features (SVM with RBF)**
+   - *Performance Metrics*:
+     - CV_AUC: 0.7878 (best overall performance)
+     - Precision: 0.2927
+     - Recall: 0.3871
+     - F1: 0.3333
+   - *Strengths*:
+     - Best overall performance in terms of CV_AUC
+     - Highest recall among all models
+     - Effective at capturing non-linear patterns in text
+     - Good at handling medium-dimensional data (96 features)
+   - *Weaknesses*:
+     - Lower precision than link-based features
+     - Sensitive to parameter tuning
+     - Computationally intensive for large datasets
+   - *Context*: Content features provide the most discriminative power for spam detection, with SVM effectively capturing textual patterns.
 
--   For practical deployment, use the feature set and model with the highest AUC.
--   Consider combining feature sets or using ensemble methods for further improvement.
--   Address class imbalance with appropriate weighting or sampling if deploying on new data.
+#### Discussion of Classification Methods in Context
+
+1. **Logistic Regression**
+   - *Suitability for Problem*: Not suitable for this spam detection task
+   - *Reasoning*: The binary nature of spam detection requires capturing complex patterns that simple linear models cannot represent
+   - *Recommendation*: Should be used only as a baseline or in combination with other features
+
+2. **Random Forest**
+   - *Suitability for Problem*: Well-suited for link-based features
+   - *Reasoning*: 
+     - Handles the high dimensionality of link features
+     - Can capture complex relationships in the link structure
+     - Provides feature importance insights
+   - *Recommendation*: Good choice for link-based analysis, but needs class imbalance handling
+
+3. **SVM with RBF Kernel**
+   - *Suitability for Problem*: Best performing for content-based features
+   - *Reasoning*:
+     - Effective at capturing non-linear patterns in text
+     - Works well with standardized features
+     - Good at handling the medium-dimensional content feature space
+   - *Recommendation*: Optimal choice for content-based spam detection
+
+#### Overall Findings and Recommendations
+
+1. **Feature Set Importance**:
+   - Content features are most discriminative (highest CV_AUC)
+   - Link features provide complementary information
+   - Direct features add little value alone
+
+2. **Model Selection Strategy**:
+   - Use SVM for content-based analysis
+   - Use Random Forest for link-based analysis
+   - Consider ensemble methods combining both approaches
+
+3. **Class Imbalance Handling**:
+   - All models show signs of struggling with class imbalance
+   - Higher recall in content-based model suggests better handling of minority class
+   - Consider additional techniques like SMOTE or class weights
+
+4. **Practical Deployment Considerations**:
+   - Content-based SVM provides best overall performance
+   - Link-based Random Forest offers good precision
+   - Consider computational costs in production environment
 
 # 5. Feature Set Combinations: Model Deployment and Comparison
 
-### 5.1 Combination 1: Obvious Features (Set 1) + Link-based Features (Set 2) ——Delicia
+### 5.1 Combination 1: Obvious Features (Set 1) + Link-based Features (Set 2) 
 
 > We combined the obvious features and link-based features to leverage both simple host-level and complex graph-based information. Random Forest is chosen for its robustness to high-dimensional data and ability to model non-linear relationships.
 
@@ -587,7 +656,7 @@ cat("\nCombo1 (Obvious + Link) AUC:", round(auc(combo1_roc), 4), "\n")
 cat("Precision:", round(combo1_precision, 4), " Recall:", round(combo1_recall, 4), " F1:", round(combo1_f1, 4), "\n")
 ```
 
-### 5.2 Combination 2: Obvious Features (Set 1) + Content-based Features (Set 3) --Moto
+### 5.2 Combination 2: Obvious Features (Set 1) + Content-based Features (Set 3) 
 
 > We combined the obvious features and content-based features to capture both simple host-level and rich textual information. SVM with RBF kernel is chosen for its ability to model non-linear relationships in medium-dimensional data.
 
@@ -632,7 +701,7 @@ cat("\nCombo2 (Obvious + Content) AUC:", round(auc(combo2_roc), 4), "\n")
 cat("Precision:", round(combo2_precision, 4), " Recall:", round(combo2_recall, 4), " F1:", round(combo2_f1, 4), "\n")
 ```
 
-### 5.3 Combination 3: Link-based Features (Set 2) + Content-based Features (Set 3) -- Bernice
+### 5.3 Combination 3: Link-based Features (Set 2) + Content-based Features (Set 3) 
 
 > We combined the link-based and content-based features to leverage both structural and textual information. Random Forest is chosen for its scalability and ability to handle mixed-type, high-dimensional data.
 
@@ -675,7 +744,7 @@ cat("\nCombo3 (Link + Content) AUC:", round(auc(combo3_roc), 4), "\n")
 cat("Precision:", round(combo3_precision, 4), " Recall:", round(combo3_recall, 4), " F1:", round(combo3_f1, 4), "\n")
 ```
 
-### 5.4 Combination 4: All Features (Set 1 + Set 2 + Set 3) --Ren
+### 5.4 Combination 4: All Features (Set 1 + Set 2 + Set 3) 
 
 > We combined all three feature sets—obvious, link-based, and content-based features—to leverage the full spectrum of available information. Random Forest is used for its robustness and ability to handle high-dimensional, mixed-type data.
 
@@ -725,6 +794,19 @@ cat("Precision:", round(combo4_precision, 4), " Recall:", round(combo4_recall, 4
 > The table below summarizes the predictive performance of each feature set combination using AUC, Precision, Recall, and F1-score. This is followed by a qualitative analysis of the results, highlighting the strengths and weaknesses of each approach and the impact of feature set integration.
 
 ```{r combo-comparison-table}
+# Create ROC plot for all combinations
+plot(combo1_roc, col = "blue", main = "ROC Curves Comparison of Feature Set Combinations", lwd = 2)
+lines(combo2_roc$specificities, combo2_roc$sensitivities, col = "red", lwd = 2)
+lines(combo3_roc$specificities, combo3_roc$sensitivities, col = "green", lwd = 2)
+lines(combo4_roc$specificities, combo4_roc$sensitivities, col = "purple", lwd = 2)
+legend("bottomright", legend = c(
+  paste("Obvious + Link (RF)"),
+  paste("Obvious + Content (SVM)"),
+  paste("Link + Content (RF)"),
+  paste("All Features (RF)")
+), col = c("blue", "red", "green", "purple"), lwd = 2)
+
+# Create comparison table
 combo_comparison <- data.frame(
   Combination = c(
     "Obvious + Link",
@@ -763,6 +845,7 @@ combo_comparison <- data.frame(
     round(combo4_f1, 4)
   )
 )
+
 combo_comparison %>%
   kable(caption = "Performance Comparison of Feature Set Combinations (Single Split)") %>%
   kable_styling(bootstrap_options = c("striped", "hover"))
@@ -770,22 +853,14 @@ combo_comparison %>%
 
 #### Qualitative Analysis
 
-- **Obvious + Link**
-  This combination utilizes both simple site-level metrics and structural link data. The AUC of 0.7662 is modest, but the recall (0.1402) is very low, meaning the model misses many spam cases. While Random Forest handles link features well, the obvious features contribute little, and the overall spam detection is weak.
+-   **Obvious + Link** This combination utilizes both simple site-level metrics and structural link data. The AUC of 0.7662 is modest, but the recall (0.1402) is very low, meaning the model misses many spam cases. While Random Forest handles link features well, the obvious features contribute little, and the overall spam detection is weak.
 
-- **Obvious + Content**
-  The SVM (RBF) model captures subtle, non-linear textual patterns in content. Although the precision (0.3000) is slightly lower, the recall improves significantly to 0.3871, resulting in the highest F1-score (0.3380) among all combinations. This suggests it's relatively better at identifying spam correctly, even with fewer features.
+-   **Obvious + Content** The SVM (RBF) model captures subtle, non-linear textual patterns in content. Although the precision (0.3000) is slightly lower, the recall improves significantly to 0.3871, resulting in the highest F1-score (0.3380) among all combinations. This suggests it's relatively better at identifying spam correctly, even with fewer features.
 
-- **Link + Content**
-  This combination balances structural and content signals. Random Forest delivers the second-highest AUC (0.8240) and a better balance of precision (0.5152) and recall (0.1828) compared to previous sets. It shows robustness across spam strategies, although F1-score (0.2698) remains slightly behind SVM.
+-   **Link + Content** This combination balances structural and content signals. Random Forest delivers the second-highest AUC (0.8240) and a better balance of precision (0.5152) and recall (0.1828) compared to previous sets. It shows robustness across spam strategies, although F1-score (0.2698) remains slightly behind SVM.
 
-- **All Features**
-  Using the full feature set yields the best overall AUC (0.8249) and the highest precision (0.5714). Recall (0.2151) improves over other Random Forest models, giving a strong F1-score of 0.3125. Although not the top in F1, this approach ensures stable, high-confidence predictions and is suitable when computational cost is acceptable.
+-   **All Features** Using the full feature set yields the best overall AUC (0.8249) and the highest precision (0.5714). Recall (0.2151) improves over other Random Forest models, giving a strong F1-score of 0.3125. Although not the top in F1, this approach ensures stable, high-confidence predictions and is suitable when computational cost is acceptable.
 
 ⸻
 
-🔍 **General Insights:**
-- Combining Link + Content is crucial — this pairing consistently outperforms combinations that include only one of the two.
-- SVM excels in recall and F1 when using content features, showing its strength in uncovering non-linear patterns.
-- Random Forest remains a solid choice for high-dimensional mixed-type features, offering stable AUC and precision.
-- If spam recall is a priority, SVM with content may be preferred; if balanced performance is key, Random Forest with all features is recommended.
+🔍 **General Insights:** - Combining Link + Content is crucial — this pairing consistently outperforms combinations that include only one of the two. - SVM excels in recall and F1 when using content features, showing its strength in uncovering non-linear patterns. - Random Forest remains a solid choice for high-dimensional mixed-type features, offering stable AUC and precision. - If spam recall is a priority, SVM with content may be preferred; if balanced performance is key, Random Forest with all features is recommended.

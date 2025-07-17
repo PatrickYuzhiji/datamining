@@ -1,0 +1,88 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+project:
+  name: UK2007 Spam Detection
+  description: >
+    A classification learning project to evaluate the predictive performance of three distinct feature sets
+    (content-based, link-based, host-based) on the UK2007 spam dataset using AUC comparison 
+
+    The UK2007 spam detection is a classification learning problem. You are to identify the value of eachofthe three types of features (which one ofthese feature sets helps to create a model with the bestpredictive power).We introduced a number ofclassification methods in the lectures.1. Deploy the most suitable of these classification methods to each of the features sets and fully justifyyour choice ofmethod.2. Rank feature sets by the quality ofresults (first list the feature set that produced the best result, thefeature set that produced the poorest result is listed last).Use AUC (Area under the3. Main objective ofthis project: Fully analyse and compare the results.ROC curve) as a basis for the comparisons. Fully explain your findings.
+
+    This is a large collection of annotated spam/nonspam hosts labeled by a group of volunteers. The base data is a set of 105,896,555 pages in 114,529 hosts in the .UK domain. 
+
+    Feature set 1: direct features 
+    Computed from the graph files. Includes two direct, obvious features: the number of pages in the host and the number of characters in the host name.
+    file: 1.uk-2007-05.obvious_features.csv
+
+    Feature set 2b: transformed link-based features
+    Computed from the graph files. Contains simple numeric transformations of the link-based features for the hosts
+    These transformation were found to work better for classification in practice than the raw link-based features. This includes mostly ratios between features such as Indegree/PageRank or TrustRank/PageRank, and log(.) of several features. 
+    file: 2.uk-2007-05.link_based_features_transformed.csv
+
+    Feature set 3a: content-based features
+    Computed from the summary version of the contents. These features include number of words in the home page, average word length, average length of the title, etc. for a sample of pages on each host. 
+    file: 3.uk-2007-05.content_based_features.csv
+
+    the labels were released in two sets. SET1, containing roughly 2/3, while SET2 containing the remaining 1/3
+    file: 
+    WEBSPAM-UK2007-SET1-labels.txt
+    WEBSPAM-UK2007-SET2-labels.txt
+
+    FILE: WEBSPAM-UK2007-SET1-labels.txt
+    This file contains the actual labels.
+
+    hostid      -- the hostid as specified in the hostnames.txt file
+    label       -- one of {nonspam, spam, undecided} depending on the spamicity
+    spamicity   -- the average of the assessments considering
+                    nonspam=0, spam=1, borderline=0.5, and not counting 'unknown'
+                    labels. If no valid label is present, a '-' sign is written
+    assessments -- a comma-separated list of individual assessments, considering
+                    the most up-to-date assessment for each assessor.
+                    The assessments are N=nonspam, S=spam, B=borderline, U=unknown
+
+    -------sample---------
+    5 normal 0.00000 j1:N,j2:N
+    8 normal 0.33333 j14:N,j17:S,j7:N
+    12 spam 1.00000 j18:U,j4:S
+    17 undecided - j13:U,j20:U
+    21 undecided 0.50000 j15:N,j16:S,j22:U
+    ----------------------
+
+    STATISTICS
+    This is the prevalence of each label in SET1 and SET2.
+
+    SET1, given for training in the Web Spam Challenge 2008:
+    3776 nonspam
+    222 spam
+    277 undecided
+
+    SET2, held for testing in the Web Spam Challenge 2008:
+    1933 nonspam
+    122 spam
+    149 undecided
+
+  target_variable: spam
+  goal: binary classification
+
+
+report:
+  format: RMarkdown
+
+
+Requirements:
+1. Present a general description of the dataset and present the general properties of the dataset.
+
+2. Deploy the classification methods to each of the feature sets and present the results. Deploy the most suitable of these classification methods to each of the features sets and fully justify
+your choice of method.
+
+3. Rank feature sets by the quality of results (first list the feature set that produced the best result, the feature set that produced the poorest result is listed last).(in this project, 1.Content-based Features; 2.Link-based Features; 3.Direct Features)
+
+4. Analyse and compare the results then discuss the strengths and weaknesses of the classification method used (in the context of this learning problem). Main objective: Fully analyse and compare the results. Use AUC (Area under the ROC curve) as a basis for the comparisons. Fully explain your findings.
+
+5. Deploy the classification method to combinations of the feature sets. Present the results and offer a
+qualitative comparison.Main objective: Fully analyse and compare the results. Use AUC (Area under the ROC curve) as a basis for the comparisons. Fully explain your findings.
+
+6. Summarize: What new and interesting things did you discover while working on this project?

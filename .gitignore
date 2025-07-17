@@ -1,0 +1,13 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+# 数据集
+data/
+
+# 结果
+results/
+
+# 临时文件
+.mdc
